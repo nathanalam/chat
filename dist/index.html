@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<head>
+  <title>Chat</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: black;
+      color: white;
+    }
+
+    .ai-text {
+      color: cyan;
+    }
+
+    #inputContainer {
+      display: flex;
+      padding: 0;
+    }
+    #input {
+      flex: 0.8;
+      width: 90%;
+      resize: vertical;
+      overflow: auto;
+      background-color: black;
+      border: 0;
+      border-bottom: 0.2em dashed white;
+      color: white;
+    }
+    #input:focus {
+      outline: none !important;
+      border: 0;
+      border-bottom: 0.2em solid white;
+    }
+    #inputButton {
+      flex: 0.1;
+      background-color: black;
+      border-radius: 10%;
+      font-size: 1em;
+      border: 0.4em;
+      border-color: gold;
+      color: gold;
+      cursor: pointer;
+      margin-right: 1em;
+    }
+    .code-block {
+      background-color: darkslategray;
+      color: whitesmoke;
+      font-family: "Courier New", Courier, monospace;
+      padding: 1em;
+      margin: 2em;
+      border: 2em;
+      width: 80%;
+      height: 10em;
+      border-color: goldenrod;
+    }
+    .loader {
+      border: 1em solid white; /* Light grey */
+      border-top: 1em solid cyan; /* Blue */
+      border-radius: 50%;
+      width: 2em;
+      height: 2em;
+      animation: spin 2s linear infinite;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotate(0deg);
+      }
+      100% {
+        transform: rotate(360deg);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="console"></div>
+  <script>
+    // constants
+    const inputField = `
+    <p class="user-text">
+        <div id="inputContainer">
+            <button id="inputButton" onClick="startChat()">\></button>
+            <div
+                id="input"contentEditable="true"
+                onkeydown="handleUserKeyDown(event)"
+                onblur="() => {controlState = false}"
+            ></div>
+        </div>
+
+    </p>
+    `;
+
+    const MAX_MESSAGE_SIZE = 2000;
+
+    // global state variables
+    var messageHistory = [
+      { role: "system", content: "You are a helpful AI assistant" },
+    ];
+    var controlState = false;
+
+    const outputConsole = document.getElementById("console");
+
+    function updateConsoleWithMessageHistory() {
+      var output = "";
+      for (var i = 0; i < messageHistory.length; i++) {
+        var message = messageHistory[i];
+        if (message["role"] == "user") {
+          output +=
+            "<p class='user-text'>" +
+            formatMessageContent(message["content"]) +
+            "<p>\n";
+        } else if (message["role"] == "assistant") {
+          output +=
+            "<p class='ai-text'>" +
+            formatMessageContent(message["content"]) +
+            "<p>\n";
+        }
+      }
+      outputConsole.innerHTML = output;
+    }
+
+    function handleUserKeyDown(event) {
+      if (event.key == "Enter" && controlState) {
+        startChat();
+      }
+      if (event.key == "Control") {
+        controlState = true;
+      } else {
+        controlState = false;
+      }
+    }
+
+    function startChat() {
+      const inputMessage = document.getElementById("input").innerText;
+      messageHistory.push({ role: "user", content: inputMessage });
+      updateConsoleWithMessageHistory();
+      outputConsole.innerHTML =
+        outputConsole.innerHTML + "\n" + '<div class="loader"></div>';
+      sendRequest();
+    }
+
+    function completeChat() {
+      outputConsole.innerHTML = outputConsole.innerHTML + "\n" + inputField;
+    }
+
+    function formatMessageContent(text) {
+      var updatedText = "";
+      text_segments = text.split("```");
+      for (var i = 0; i < text_segments.length; i++) {
+        text_block = text_segments[i];
+        if (i % 2 == 0) {
+          // outside of code block
+          text_block = text_block.replace(/(\r\n|\n|\r)/gm, "<br />");
+          updatedText += text_block;
+        } else {
+          // inside text_block
+          code_lines = text_block.split("\n");
+          for (const language of [
+            "python",
+            "javascript",
+            "rust",
+            "java",
+            "sh",
+            "bash",
+            "c",
+            "c++",
+          ]) {
+            if (code_lines[0] == language) {
+              code_lines.shift();
+              break;
+            }
+          }
+          text_block = code_lines.join("\n");
+          updatedText +=
+            "<textarea title='Click to copy to clipboard' class='code-block' readonly>" +
+            text_block +
+            "</textarea>";
+        }
+      }
+
+      return updatedText;
+    }
+
+    function compressMessageHistory() {
+      var compressedMessageHistory = [];
+      let currentSize = JSON.stringify(messageHistory[0]).length;
+      for (var i = messageHistory.length - 1; i < 0; i--) {
+        const message = messageHistory[i]
+        const newSize = currentSize + JSON.stringify(message);
+        if (newSize > MAX_MESSAGE_SIZ)
+          break;
+        compressedMessageHistory.unshift(message);
+        currentSize = newSize;
+      }
+      compressedMessageHistory.unshift(messageHistory[0]);
+      return compressMessageHistory;
+    }
+
+    function sendRequest() {
+      var xhr = new XMLHttpRequest();
+      xhr.open(
+        "POST",
+        "https://pe3eojqxai.execute-api.us-east-1.amazonaws.com/prod/"
+      );
+      xhr.setRequestHeader("Content-Type", "application/json");
+      xhr.send(JSON.stringify(messageHistory));
+      xhr.addEventListener("readystatechange", function () {
+        if (this.status == 200 && this.readyState == 4) {
+          const response = JSON.parse(this.responseText);
+          const responseMessage = response["choices"][0]["message"]["content"];
+          messageHistory.push({ role: "assistant", content: responseMessage });
+          updateConsoleWithMessageHistory();
+          completeChat();
+        } else if (this.readyState == 4) {
+          console.log(this);
+          messageHistory.push({
+            role: "assistant",
+            content: `Sorry I had an error. Status ${this.status}`,
+          });
+          updateConsoleWithMessageHistory();
+          completeChat();
+        }
+      });
+    }
+
+    // initial state
+    outputConsole.innerHTML = inputField;
+  </script>
+</body>
